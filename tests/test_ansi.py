@@ -600,17 +600,23 @@ class TestConsoleSafety(unittest.TestCase):
         import time
 
         class SlowStream(FakeStream):
-            """Yields between characters, so an unlocked writer really does tear."""
+            """One character at a time, so a frame can be torn in the middle."""
 
             def write(self, text):
                 for ch in text:
                     super().write(ch)
-                    time.sleep(0)
                 return len(text)
 
         def run(use_batch):
             stream = SlowStream()
             console = Console(stream=stream, caps=caps())
+            # A barrier, not a sleep: whether two threads interleave is up to the
+            # scheduler, and a lock released and immediately re-taken by the same
+            # thread tears nothing at all -- which failed this test on its own
+            # vacuousness check rather than on the lock it is about. Here both
+            # writers are *made* to sit between the "<" and the tag, so an
+            # unbatched frame tears on every run, on every build.
+            gate = threading.Barrier(2, timeout=10)
 
             def frame(tag):
                 for _ in range(60):
@@ -619,6 +625,7 @@ class TestConsoleSafety(unittest.TestCase):
                             console.write("<", tag, ">", flush=False)
                     else:
                         console.write("<", flush=False)
+                        gate.wait()          # the other writer is mid-frame too
                         console.write(tag, flush=False)
                         console.write(">", flush=False)
 

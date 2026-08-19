@@ -120,7 +120,25 @@ COMMANDS = (
 #: help screen that offers a key which maximises the window instead of adding a
 #: line is worse than one that stays quiet, so there it goes and ``\`` and
 #: ``"""`` carry multi-line on their own.
-ALT_ENTER = os.name != "nt"
+def _alt_enter_bindable() -> bool:
+    """Whether the newline chord can actually be bound in this interpreter.
+
+    It is a GNU readline macro, so it needs GNU readline: a stock Windows Python
+    has no readline at all, and the libedit shim Apple and several distros ship
+    under that name cannot bind it (and lume gives libedit the plain reader
+    anyway). Detected here rather than imported from `lume.input`, which imports
+    this module.
+    """
+    if os.name == "nt":
+        return False
+    try:
+        import readline
+    except Exception:
+        return False
+    return "libedit" not in (getattr(readline, "__doc__", "") or "")
+
+
+ALT_ENTER = _alt_enter_bindable()
 
 #: End-of-file is Ctrl-Z Enter on a Windows console and Ctrl-D everywhere else.
 #: Naming the wrong one in the help sends the user pressing a key that does

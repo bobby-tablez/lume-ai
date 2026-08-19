@@ -153,7 +153,7 @@ does start with a slash, double it: `//not a command`.
 | `Enter` | Send the message. |
 | `\` at end of line | Continue on the next line; the backslash is dropped. |
 | `"""` | Open a block. A line ending in `"""` closes it and sends. |
-| `Alt+Enter` | Add a newline without sending. *(POSIX; Windows has no key to bind)* |
+| `Alt+Enter` | Add a newline without sending. *(needs GNU readline — not Windows, not libedit builds; `\` and `"""` work everywhere)* |
 | paste | A multi-line paste arrives whole, as one message — never one per line. |
 | `Tab` | Complete a command or its argument. |
 | `↑` `↓` | Walk back and forth through history. |

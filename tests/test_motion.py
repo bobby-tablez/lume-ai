@@ -27,7 +27,9 @@ import subprocess
 import sys
 import threading
 import time
+import pathlib
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -838,13 +840,28 @@ class SignalTests(unittest.TestCase):
 
 class ExitHookTests(unittest.TestCase):
     def test_the_atexit_sweep_is_registered(self):
-        """regression: deleting `@atexit.register` left the whole suite green."""
+        """regression: deleting `@atexit.register` left the whole suite green.
+
+        Asserted against the source rather than by unregistering the live
+        callback and counting: `atexit.unregister` is a no-op on some CPython
+        builds, which failed this test on a perfectly registered sweep. What the
+        regression actually was is a deleted line, and that is what this reads.
+        """
+        import ast
         import atexit
-        before = atexit._ncallbacks()
-        atexit.unregister(motion._restore_all)
-        after = atexit._ncallbacks()
-        atexit.register(motion._restore_all)
-        self.assertEqual(before - after, 1, "motion._restore_all is not registered")
+
+        tree = ast.parse(pathlib.Path(motion.__file__).read_text(encoding="utf-8"))
+        registered = [
+            node.args[0].id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and node.args
+            and isinstance(node.func, ast.Attribute) and node.func.attr == "register"
+            and isinstance(node.func.value, ast.Name) and node.func.value.id == "atexit"
+            and isinstance(node.args[0], ast.Name)
+        ]
+        self.assertIn("_restore_all", registered,
+                      "motion._restore_all is not registered with atexit")
+        self.assertGreaterEqual(atexit._ncallbacks(), 1, "nothing registered at all")
 
     def test_the_sweep_cleans_a_leaked_status(self):
         console = make_console()

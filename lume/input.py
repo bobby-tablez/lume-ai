@@ -93,6 +93,12 @@ closing the window would leave the user's shell needing ``stty sane``.
 * **Alt+Enter** (see ``multiline_key``) inserts a newline without sending; it is
   implemented as a readline macro that appends ``\\`` and accepts the line.
 
+**libedit** — what Apple and several distributions ship under the name
+``readline`` — takes the plain path too, for the reasons in :func:`_is_libedit`.
+It keeps bracketed paste, the paste framing and the editing keys; what it gives
+up is libedit's own line editor, which is why Up/Down are implemented here (see
+:meth:`Prompt._recall`) rather than left to the library.
+
 **Windows** has no ``readline`` in a stock Python and no ``select`` on a console
 handle, so it takes the plain path: the console driver does the line editing, and
 ``msvcrt.kbhit`` — the one thing that will say whether more input is already
@@ -219,7 +225,13 @@ _EOL = re.compile(r"\r\n|\r|\n")
 
 # Backspace, Ctrl-U, Ctrl-W, Ctrl-D: the keys the reader has to handle itself
 # once the line discipline is out of the way. Everything else is text.
-_EDIT_KEYS = re.compile(r"[\x7f\x08\x15\x17\x04]")
+#: Keys the plain reader acts on itself. The arrows are matched whole so a
+#: three-byte sequence is never mistaken for an ESC followed by text; an
+#: escape that is not one of these stays text and is neutralised on the way
+#: to the screen.
+_EDIT_KEYS = re.compile(r"[\x7f\x08\x15\x17\x04]|\x1b[\[O][AB]")
+_UP_KEYS = ("\x1b[A", "\x1bOA")
+_DOWN_KEYS = ("\x1b[B", "\x1bOB")
 
 # ---------------------------------------------------------------------- secrets
 #
@@ -383,6 +395,18 @@ def readline_escape(s: str) -> str:
     smears. The visible width of the result is unchanged.
     """
     return _ESC_RUN.sub(lambda m: "\001" + m.group(0) + "\002", s)
+
+
+def _is_libedit(rl) -> bool:
+    """True for the libedit shim Apple and several distros ship as `readline`.
+
+    It has no `enable-bracketed-paste`, so nothing would consume an `ESC[200~`
+    guard, and it breaks a pasted CRLF into pieces of its own before any of this
+    code sees the bytes -- so a paste cannot be reassembled on that path at all.
+    lume gives it the plain reader instead. Detected by the module docstring,
+    because libedit reports no version of its own.
+    """
+    return rl is not None and "libedit" in (getattr(rl, "__doc__", "") or "")
 
 
 def _strip_eol(line: str) -> str:
@@ -646,6 +670,8 @@ class Prompt:
         self.history_max = max(1, int(history_max))
         self._stdin = stdin
         self._rl = readline
+        # libedit takes the plain path; see _readline_ready.
+        self._libedit = _is_libedit(readline)
         self._matches = []
         self._completer_fn = self._complete    # one object, so it can be recognised
         self._interrupts = 0
@@ -716,6 +742,7 @@ class Prompt:
         """
         if self._closed:
             raise ValueError("Prompt is closed")
+        self._hist_at, self._hist_draft = None, ""   # each read starts at the live line
         if placeholder and self.caps.is_tty:
             self.console.print(self.theme.render(placeholder, "prompt.hint", self.caps))
 
@@ -821,7 +848,12 @@ class Prompt:
         # readline only makes sense when it can own the line: a tty at both ends,
         # and the *process's own* stdin — input() cannot be pointed at anything
         # else, so an injected stream must take the plain path or be ignored.
-        return bool(self._rl is not None and self.caps.is_tty
+        # libedit is excluded on purpose: it has no bracketed-paste support and
+        # splits a pasted CRLF into pieces of its own before anything here sees
+        # the bytes, so a paste cannot be put back together on that path. The
+        # plain reader below reads the terminal directly and frames pastes
+        # properly, which matters more than libedit's editing keys.
+        return bool(self._rl is not None and not self._libedit and self.caps.is_tty
                     and stdin is sys.stdin and _isatty(stdin))
 
     def _read_readline(self, prompt: str, prefill: str, stdin,
@@ -1073,18 +1105,23 @@ class Prompt:
                 i = stop
             if m is None:
                 break
-            ch = chunk[i]
-            i += 1
+            key = m.group(0)
+            i += len(key)
             if _open_frame(buf):                      # between the guards it is text
-                buf += ch
-                self._echo(ch)
-                shown += ch
+                buf += key
+                self._echo(key)
+                shown += key
                 continue
-            if ch == "\x04":                          # Ctrl-D: send it, or leave
+            if key == "\x04":                         # Ctrl-D: send it, or leave
                 return buf, shown, True
-            if ch in "\x7f\x08":                      # Backspace
+            if key in _UP_KEYS or key in _DOWN_KEYS:
+                recalled = self._recall(key in _UP_KEYS, buf)
+                if recalled is None:
+                    continue
+                buf = recalled
+            elif key in ("\x7f", "\x08"):             # Backspace
                 buf = buf[:-1]
-            elif ch == "\x15":                        # Ctrl-U: kill the line
+            elif key == "\x15":                       # Ctrl-U: kill the line
                 buf = buf[:buf.rfind("\n") + 1]
             else:                                     # Ctrl-W: kill a word
                 head = buf.rstrip(" \t")
@@ -1092,6 +1129,36 @@ class Prompt:
                                head.rfind("\n")) + 1]
             shown = self._repaint(marker, shown, buf)
         return buf, shown, False
+
+    #: Where Up/Down have walked to, and the line that was being typed when the
+    #: walk began. Both reset at the start of every read.
+    _hist_at = None
+    _hist_draft = ""
+
+    def _recall(self, up: bool, buf: str):
+        """Walk history for the reader that has no readline to do it.
+
+        Returns the line to show, or None to leave the line alone -- Down on a
+        line nobody walked away from, or Up with nothing to walk to. Multi-line
+        entries are skipped: they are kept in memory for the app, but a reader
+        that paints one line cannot put one back for editing honestly.
+        """
+        entries = [h for h in self._history if "\n" not in h]
+        if not entries:
+            return None
+        if self._hist_at is None:
+            if not up:
+                return None                  # already at the live line
+            self._hist_draft = buf           # keep what was being typed
+            self._hist_at = len(entries)
+        pos = self._hist_at + (-1 if up else 1)
+        if pos < 0:
+            return None                      # oldest entry: stay on it
+        if pos >= len(entries):
+            self._hist_at = None
+            return self._hist_draft          # back out to the live line
+        self._hist_at = pos
+        return entries[pos]
 
     def _echo(self, text: str) -> None:
         """Paint what the terminal is no longer echoing for us, harmlessly.
@@ -1328,6 +1395,8 @@ class Prompt:
         except (OSError, ValueError, termios.error):        # pragma: no cover
             return
         self._owner = (fd, saved)
+        # Off, not merely "not on": a terminal left in bracketed-paste mode by
+        # some earlier program would otherwise send guards nothing here can read.
         _write_fd(fd, _BP_ON)
         if not self._hooked:
             self._hooked = True

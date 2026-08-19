@@ -10,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from lume.ansi import Caps, display_width, strip_ansi
+import lume.commands as commands_mod
 from lume.commands import (COMMANDS, GROUP_BLURBS, GROUPS, INPUT_RULES,
                            ORIENTATION, Command, arg_values, find, groups,
                            help_text, names, parse, suggest)
@@ -333,7 +334,13 @@ class HelpTextTests(unittest.TestCase):
     def test_input_topic_shows_only_the_typing_rules(self):
         out = plain(help_text(self.theme, ASCII, 80, "input"))
         self.assertIn("Ctrl-D", out)
-        self.assertIn("Alt+Enter", out)
+        # The newline chord is only listed where it can actually be bound; the
+        # rules that work on every build are the ones always shown.
+        self.assertIn('"""', out)
+        if commands_mod.ALT_ENTER:
+            self.assertIn("Alt+Enter", out)
+        else:
+            self.assertNotIn("Alt+Enter", out)
         self.assertNotIn("/resume", out)
         self.assertNotIn("No help topic", out)
 
