@@ -56,7 +56,7 @@ pip install lume-ai          # provides the `lume` command
 Or run it straight from a checkout — there is nothing to build:
 
 ```bash
-git clone https://github.com/YOUR-GITHUB-USERNAME/lume-ai && cd lume-ai
+git clone https://github.com/bobby-tablez/lume-ai && cd lume-ai
 ./lume-cli                   # or: python3 -m lume
 ```
 

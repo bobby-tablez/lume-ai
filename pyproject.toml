@@ -34,10 +34,10 @@ dependencies = []
 lume = "lume.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/YOUR-GITHUB-USERNAME/lume-ai"
-Repository = "https://github.com/YOUR-GITHUB-USERNAME/lume-ai"
-Issues = "https://github.com/YOUR-GITHUB-USERNAME/lume-ai/issues"
-Changelog = "https://github.com/YOUR-GITHUB-USERNAME/lume-ai/releases"
+Homepage = "https://github.com/bobby-tablez/lume-ai"
+Repository = "https://github.com/bobby-tablez/lume-ai"
+Issues = "https://github.com/bobby-tablez/lume-ai/issues"
+Changelog = "https://github.com/bobby-tablez/lume-ai/releases"
 
 [tool.hatch.version]
 path = "lume/__init__.py"
