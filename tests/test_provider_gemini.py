@@ -28,7 +28,7 @@ from lume.providers.gemini import (  # noqa: E402
     GeminiClient, provider, resolve_model,
 )
 
-KEY = "AIzaSy" "TESTKEY-not-a-real-credential-000000"
+KEY = "AIzaSyTESTKEY-not-a-real-credential-000000"
 
 
 # --------------------------------------------------------------------------- helpers

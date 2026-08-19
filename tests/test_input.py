@@ -644,6 +644,77 @@ class PtyHarness(PromptTestCase):
         return box["value"]
 
 
+class HistoryKeyTests(PromptTestCase):
+    """Up and Down for the reader that has no readline to provide them.
+
+    libedit builds take the plain path (see `_readline_ready`), so without this
+    a macOS user would have no history recall at all.
+    """
+
+    def make_walked(self, *entries):
+        p = self.make(history_path=False)
+        for entry in entries:
+            p.add_history(entry)
+        return p
+
+    def test_up_walks_back_and_down_returns_to_the_draft(self):
+        p = self.make_walked("first", "second")
+        self.assertEqual(p._recall(True, "draft"), "second")
+        self.assertEqual(p._recall(True, ""), "first")
+        self.assertEqual(p._recall(False, ""), "second")
+        self.assertEqual(p._recall(False, ""), "draft")
+
+    def test_down_on_a_live_line_does_nothing(self):
+        p = self.make_walked("only")
+        self.assertIsNone(p._recall(False, "typing"))
+
+    def test_up_stops_at_the_oldest_entry(self):
+        p = self.make_walked("oldest")
+        self.assertEqual(p._recall(True, ""), "oldest")
+        self.assertIsNone(p._recall(True, ""))
+
+    def test_no_history_leaves_the_line_alone(self):
+        p = self.make_walked()
+        self.assertIsNone(p._recall(True, "typing"))
+
+    def test_multi_line_entries_are_skipped(self):
+        # Kept in memory for the app, but a one-line reader cannot put one back
+        # for editing without lying about what it is.
+        p = self.make_walked("plain", "two\nlines")
+        self.assertEqual(p._recall(True, ""), "plain")
+
+    def test_each_read_starts_at_the_live_line(self):
+        p = self.make("hello\n", history_path=False)
+        p.add_history("earlier")
+        p._recall(True, "")                          # walked during a previous read
+        self.assertEqual(p.read(), "hello")
+        self.assertIsNone(p._hist_at)
+
+
+@unittest.skipUnless(hasattr(os, "openpty"), "needs a pty")
+class HistoryKeyTerminalTests(PtyHarness):
+    """The same walk, driven by the actual escape sequences a terminal sends."""
+
+    def test_up_arrow_recalls_the_previous_line(self):
+        p = self.make(stdin=self.stdin, history_path=False)
+        p.add_history("recalled")
+        self.assertEqual(self.read_live(p, "\x1b[A\r"), "recalled")
+
+    def test_application_mode_arrows_work_too(self):
+        # Some terminals send ESC O A rather than ESC [ A once the cursor keys
+        # are in application mode; both are the same key.
+        p = self.make(stdin=self.stdin, history_path=False)
+        p.add_history("recalled")
+        self.assertEqual(self.read_live(p, "\x1bOA\r"), "recalled")
+
+    def test_an_arrow_inside_a_paste_is_text_not_navigation(self):
+        p = self.make(stdin=self.stdin, history_path=False)
+        p.add_history("recalled")
+        got = self.read_live(p, "\x1b[200~up\x1b[Adown\x1b[201~\r")
+        self.assertNotIn("recalled", got)
+        self.assertIn("up", got)
+
+
 class PtyTests(PtyHarness):
     """The submission rules against a real terminal."""
 
@@ -1330,8 +1401,8 @@ class SecretDetectionTests(unittest.TestCase):
         for text in ("sk-ant-api03-abcdefgh",
                      "export ANTHROPIC_API_KEY=sk-ant-oat01-xxxxxxxx",
                      "Authorization: Bearer abc123def456",
-                     "ghp_" "0123456789abcdefghijklmnopqrst",
-                     "AKIA" "IOSFODNN7EXAMPLE",
+                     "ghp_0123456789abcdefghijklmnopqrst",
+                     "AKIAIOSFODNN7EXAMPLE",
                      "-----BEGIN RSA PRIVATE KEY-----"):
             self.assertTrue(looks_secret(text), text)
 
@@ -1927,15 +1998,15 @@ class SecretShapeTests(unittest.TestCase):
         "SK-ANT-API03-AAAABBBBCCCCDDDD",
         "Sk-Ant-Api03-AAAABBBBCCCCDDDD",
         "export ANTHROPIC_AUTH_TOKEN=abc123def456ghi789",
-        "ANTHROPIC_AUTH_TOKEN=sk-live-" "9f2b7c1d4e8a",
+        "ANTHROPIC_AUTH_TOKEN=sk-live-9f2b7c1d4e8a",
         "Bearer eyJhbGciOiJIUzI1NiJ9.abcdefgh.ijklmnop",
         "Authorization: Bearer abc123def456",
         "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-        "sk-proj-" "abc123def456ghi789jkl",
-        "github_pat_" "11ABCDEFG0abcdefghijklmnop",
-        "ghp_" "0123456789abcdefghijklmnopqrst",
-        "AIzaSy" "A0000000000000000000000000000000",
-        "AKIA" "IOSFODNN7EXAMPLE",
+        "sk-proj-abc123def456ghi789jkl",
+        "github_pat_11ABCDEFG0abcdefghijklmnop",
+        "ghp_0123456789abcdefghijklmnopqrst",
+        "AIzaSyA0000000000000000000000000000000",
+        "AKIAIOSFODNN7EXAMPLE",
         "postgres://user:s3cr3tpassword@host/db",
         "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAABlwAAAAdz",
         "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj",
@@ -1946,14 +2017,14 @@ class SecretShapeTests(unittest.TestCase):
         # separator was a literal '-', so the whole sk_/rk_/pk_ family walked
         # past; xox[abprs] missed xoxc and xoxe; there was no xapp- or npm_ at
         # all; and the key/value noun list had no Account, Client or Master.
-        "sk_live_" "4eC39HqLyjWDarjtT1zdp7dc",
-        "STRIPE_SECRET=sk_live_" "4eC39HqLyjWDarjtT1zdp7dc",
-        "rk_test_" "51H8xYzAbCdEfGhIjKlMnOp",
-        "pk_live_" "51H8xYzAbCdEfGhIjKlMnOp",
-        "xox" "c-" "1234567890-1234567890123-abcdefghijkl",
-        "xox" "e-" "1-My0xLTEyMzQ1Njc4OTAxMjM0NTY3ODkw",
-        "xapp-" "1-A01234ABCDE-1234567890123-abcdef0123456789abcdef",
-        "npm_" "AbCdEf0123456789AbCdEf0123456789ab",
+        "sk_live_EXAMPLE_NOT_A_REAL_STRIPE_KEY",
+        "STRIPE_SECRET=sk_live_EXAMPLE_NOT_A_REAL_STRIPE_KEY",
+        "rk_test_51H8xYzAbCdEfGhIjKlMnOp",
+        "pk_live_51H8xYzAbCdEfGhIjKlMnOp",
+        "xoxc-1234567890-1234567890123-abcdefghijkl",
+        "xoxe-1-EXAMPLE-NOT-A-REAL-SLACK-TOKEN",
+        "xapp-1-A01234ABCDE-1234567890123-abcdef0123456789abcdef",
+        "npm_AbCdEf0123456789AbCdEf0123456789ab",
         "AccountKey=abcd1234efgh5678ijkl==",
         "DefaultEndpointsProtocol=https;AccountKey=abcd1234efgh5678ijkl==",
         "ClientSecret: 7Q~aB3dEfGhIjKlMnOpQrStUvWx",
@@ -1961,8 +2032,8 @@ class SecretShapeTests(unittest.TestCase):
         "master-key: opensesameplease",
         "consumer_key = 9f8e7d6c5b4a39281706",
         "MasterKey=Zm9vYmFyMTIzNDU2Nzg5MA==",
-        "glpat-" "ABCdefGHIjklMNOpqr12",
-        "ya29." "a0AfH6SMBx1234567890abcdefghij",
+        "glpat-EXAMPLE-NOT-A-REAL-GITLAB-TOKEN",
+        "ya29.a0AfH6SMBx1234567890abcdefghij",
     )
 
     NEGATIVES = (
@@ -2016,7 +2087,7 @@ class SecretsAndTheFileTests(PromptTestCase):
 
     def test_a_secret_buried_in_a_multiline_paste_is_not_remembered(self):
         p = self.make(history_path=self.path, stdin=PipeStdin(""))
-        p.add_history("first line\nANTHROPIC_AUTH_TOKEN=sk-live-" "9f2b7c1d4e8a\nlast")
+        p.add_history("first line\nANTHROPIC_AUTH_TOKEN=sk-live-9f2b7c1d4e8a\nlast")
         p.close()
         self.assertEqual(p.history(), [])
         self.assertEqual(self.path.read_text(), "")
@@ -2123,7 +2194,7 @@ class OrdinaryTextIsRememberedTests(PromptTestCase):
 
     def test_and_a_real_secret_in_the_same_shapes_is_still_dropped(self):
         p = self.make(history_path=self.path, stdin=PipeStdin(""))
-        p.add_history("e83c5163316f89bfbde7d9ab23ca2e25604af290 sk_live_" "4eC39HqLyjWD")
+        p.add_history("e83c5163316f89bfbde7d9ab23ca2e25604af290 sk_live_EXAMPLE_NOT_A_REAL_KEY")
         p.close()
         self.assertEqual(p.history(), [])
         self.assertEqual(self.path.read_text(), "")

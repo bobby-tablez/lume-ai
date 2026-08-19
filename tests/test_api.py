@@ -803,7 +803,7 @@ class TestRetries(unittest.TestCase):
             def open(self, url, headers, body, timeout):
                 raise RuntimeError("upstream rejected headers %r" % (headers,))
 
-        token = "glpat-" "abcdefghijklmnop"
+        token = "glpat-abcdefghijklmnop"
         c = Client(token, base_url="http://127.0.0.1:1", transport=Rude(), max_retries=2)
         c._sleep = lambda d: None
         with self.assertRaises(APIError) as ctx:
