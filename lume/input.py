@@ -507,19 +507,21 @@ def interrupt_guard(on_interrupt):
                 signal.signal(signal.SIGINT, previous)
 
 
-def default_history_path() -> Path:
-    """``$LUME_HISTORY``, else the lume data directory's ``history`` file."""
-    env = os.environ
-    override = env.get("LUME_HISTORY")
+def default_history_path(env=None) -> Path:
+    """``$LUME_HISTORY``, else ``history`` inside lume's data directory.
+
+    The directory is asked for rather than worked out again here. It *was*
+    worked out again here, and the copy was missing the macOS branch the others
+    have -- so on a Mac the history file sat alone in ``~/.local/share/lume``
+    while the sessions it belongs beside were in ``~/Library/Application
+    Support/lume``. One resolver means that cannot drift apart again.
+    """
+    env = os.environ if env is None else env
+    override = (env.get("LUME_HISTORY") or "").strip()
     if override:
         return Path(override).expanduser()
-    home = env.get("LUME_HOME")
-    if home:
-        return Path(home).expanduser() / "history"
-    xdg = env.get("XDG_DATA_HOME")
-    if xdg:
-        return Path(xdg).expanduser() / "lume" / "history"
-    return Path.home() / ".local" / "share" / "lume" / "history"
+    from .config import data_home        # local: keeps Prompt cheap to import
+    return data_home(env) / "history"
 
 
 def default_completer(text: str, line: str) -> list:

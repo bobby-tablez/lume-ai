@@ -24,6 +24,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from lume import input as inp
+from lume import store
 from lume.ansi import Caps, Console, display_width, strip_ansi
 from lume.input import (Prompt, default_completer, default_history_path,
                         looks_secret, readline_escape)
@@ -1988,6 +1989,51 @@ p.close()
         missing = [f"child-{i:02d}" for i in range(60)
                    if f"child-{i:02d}" not in lines]
         self.assertEqual(missing, [], f"lost {len(missing)} entries")
+
+
+class HistoryLocationTests(unittest.TestCase):
+    """The history file belongs beside the sessions, on every platform.
+
+    regression: this module worked the data directory out for itself and its copy
+    had no macOS branch, so on a Mac the history file was written to
+    ~/.local/share/lume while the sessions were in ~/Library/Application Support
+    -- a user looking for their chats next to their history found an empty
+    directory. Asserted against the store rather than against a literal path, so
+    the two cannot disagree again whatever the rule becomes.
+    """
+
+    def resolve(self, platform, env):
+        with mock.patch.object(sys, "platform", platform):
+            return default_history_path(env), store.default_root(env)
+
+    def test_history_sits_beside_the_sessions_on_every_platform(self):
+        for platform in ("darwin", "linux", "win32"):
+            with self.subTest(platform=platform):
+                history, root = self.resolve(platform, {})
+                self.assertEqual(history.parent, root)
+                self.assertEqual(history.name, "history")
+
+    def test_macos_uses_the_apple_location(self):
+        history, root = self.resolve("darwin", {})
+        self.assertIn("Application Support", str(root))
+        self.assertIn("Application Support", str(history))
+
+    def test_lume_home_moves_both(self):
+        for platform in ("darwin", "linux"):
+            with self.subTest(platform=platform):
+                history, root = self.resolve(platform, {"LUME_HOME": "/tmp/elsewhere"})
+                self.assertEqual(root, Path("/tmp/elsewhere"))
+                self.assertEqual(history, Path("/tmp/elsewhere/history"))
+
+    def test_xdg_moves_both(self):
+        history, root = self.resolve("linux", {"XDG_DATA_HOME": "/tmp/xdg"})
+        self.assertEqual(root, Path("/tmp/xdg/lume"))
+        self.assertEqual(history.parent, root)
+
+    def test_lume_history_still_overrides_everything(self):
+        history, _ = self.resolve("darwin", {"LUME_HISTORY": "/tmp/just-here",
+                                             "LUME_HOME": "/tmp/elsewhere"})
+        self.assertEqual(history, Path("/tmp/just-here"))
 
 
 class SecretShapeTests(unittest.TestCase):
