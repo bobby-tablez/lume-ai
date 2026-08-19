@@ -38,7 +38,9 @@ def config_path(env=None) -> Path:
     if home:
         return Path(home).expanduser() / "config.json"
     xdg = env.get("XDG_CONFIG_HOME")
-    base = Path(xdg).expanduser() if xdg else _home() / ".config"
+    base = Path(xdg).expanduser() if xdg else None
+    if base is None or not base.is_absolute():
+        base = _home() / ".config"
     return base / "lume" / "config.json"
 
 
@@ -50,7 +52,12 @@ def data_home(env=None) -> Path:
         return Path(explicit).expanduser()
     xdg = env.get("XDG_DATA_HOME")
     if xdg:
-        return Path(xdg).expanduser() / "lume"
+        # The XDG spec says a relative path in these variables is invalid and
+        # must be ignored. `store.default_root` already does this; disagreeing
+        # would put the config and the sessions in different directories.
+        candidate = Path(xdg).expanduser()
+        if candidate.is_absolute():
+            return candidate / "lume"
     if sys.platform == "darwin":
         return _home() / "Library" / "Application Support" / "lume"
     return _home() / ".local" / "share" / "lume"

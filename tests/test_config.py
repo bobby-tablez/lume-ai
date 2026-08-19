@@ -149,5 +149,34 @@ class TestThemeAuto(unittest.TestCase):
         self.assertEqual(cfg.theme, "auto")
         self.assertTrue(cfg.warnings)
 
+
+class TestXdgPathsAgreeWithTheStore(unittest.TestCase):
+    """Two modules resolving one rule is how history and sessions drifted apart."""
+
+    def test_a_relative_xdg_data_home_is_ignored_by_both(self):
+        from lume.store import default_root
+        env = {"XDG_DATA_HOME": "relative/path"}
+        self.assertEqual(str(data_home(env)), str(default_root(env)))
+        self.assertTrue(data_home(env).is_absolute())
+
+    def test_an_absolute_xdg_data_home_is_honoured_by_both(self):
+        from lume.store import default_root
+        env = {"XDG_DATA_HOME": "/tmp/xdg-abs"}
+        self.assertEqual(str(data_home(env)), str(default_root(env)))
+
+    def test_lume_home_still_wins_for_both(self):
+        from lume.store import default_root
+        env = {"LUME_HOME": "/tmp/lh", "XDG_DATA_HOME": "/tmp/xdg-abs"}
+        self.assertEqual(str(data_home(env)), str(default_root(env)))
+
+    def test_a_relative_xdg_config_home_is_ignored(self):
+        path = config_path({"XDG_CONFIG_HOME": "relative/conf"})
+        self.assertTrue(path.is_absolute())
+        self.assertNotIn("relative", str(path))
+
+    def test_an_absolute_xdg_config_home_is_honoured(self):
+        self.assertEqual(config_path({"XDG_CONFIG_HOME": "/tmp/c"}),
+                         Path("/tmp/c/lume/config.json"))
+
 if __name__ == "__main__":
     unittest.main()
