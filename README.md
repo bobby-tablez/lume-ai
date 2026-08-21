@@ -1,11 +1,4 @@
 <div align="center">
-
-```
-  █   ▄  ▄  ▄▄▄▄▄   ▄▄
-  █   █  █  █ █ █  █▄▄█
-  █▄  ▀▄▄▀  █ █ █  ▀▄▄▄
-```
-
 **A small, beautiful terminal chat client for Claude, GPT and Gemini.**
 
 *lume* — rhymes with **room**. Not "loo-may", not "lum". It's the old word for *light*.
